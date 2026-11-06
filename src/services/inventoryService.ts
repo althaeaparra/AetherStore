@@ -64,6 +64,53 @@ class InventoryService {
         console.warn('Could not decrypt orders from local vault:', e);
       }
     }
+
+    // If no orders exist yet, seed a live priority order for immediate tracking demo
+    if (this.orders.length === 0) {
+      this.orders = [
+        {
+          id: 'ORD-78294',
+          items: [{ productId: 'prod-visor-spectrum', variantId: 'v-titanium', quantity: 1 }],
+          totalAmount: 1499,
+          shippingAddress: {
+            fullName: 'Alexander Banton',
+            street: '742 Spatial Horizon Way',
+            city: 'San Francisco',
+            state: 'CA',
+            postalCode: '94107',
+            country: 'United States',
+          },
+          paymentMethod: {
+            type: 'card',
+            lastFour: '4242',
+            brand: 'Visa Tokenized',
+            token: 'tok_pci_aes256_v1',
+          },
+          status: 'in_transit',
+          createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+          estimatedDelivery: new Date(Date.now() + 18 * 60 * 1000).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          courier: {
+            name: 'Alex Rivera',
+            vehicle: 'Aether Autonomous Electric Van #14',
+            vehicleType: 'electric_van',
+            phone: '+1 (555) 019-2831',
+            rating: 4.95,
+            currentLat: 37.7749,
+            currentLng: -122.4194,
+            destinationLat: 37.7892,
+            destinationLng: -122.4014,
+            progressPercent: 35,
+            etaMinutes: 14,
+            speedKmh: 42,
+          },
+          gmailSent: true,
+        },
+      ];
+      this.saveEncryptedOrders();
+    }
   }
 
   private async saveEncryptedOrders() {

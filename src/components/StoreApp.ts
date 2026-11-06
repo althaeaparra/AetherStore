@@ -15,7 +15,7 @@ import { sendOrderConfirmationEmail, send2FACodeEmail } from '../services/gmailS
 import { archiveInvoiceToDrive, downloadInvoiceLocal } from '../services/driveService';
 import { tokenizePaymentCard } from '../services/cryptoService';
 import { ThreeModelViewer, ModelFinish } from './ThreeModelViewer';
-import { OrderTrackingMap } from '../services/mapsService';
+import { GoogleMapsDeliveryTracker } from './GoogleMapsDeliveryTracker';
 import * as xb from 'xrblocks';
 import { WebXRShowroom } from './WebXRShowroom';
 
@@ -33,7 +33,7 @@ export class StoreApp {
   private active3DProduct: Product | null = null;
   private threeViewer: ThreeModelViewer | null = null;
   private activeTrackingOrder: Order | null = null;
-  private trackingMapInstance: OrderTrackingMap | null = null;
+  private deliveryTracker: GoogleMapsDeliveryTracker | null = null;
   private isCartOpen: boolean = false;
   private isWishlistOpen: boolean = false;
   private isCheckoutOpen: boolean = false;
@@ -206,8 +206,9 @@ export class StoreApp {
             }">
               ${this.t('catalog')}
             </button>
-            <button id="nav-3d-btn" class="hover:text-blue-600 dark:hover:text-cyan-400 transition-colors whitespace-nowrap text-slate-600 dark:text-slate-300">
-              ${this.t('lab3d')}
+            <button id="nav-3d-btn" class="hover:text-blue-600 dark:hover:text-cyan-400 transition-colors whitespace-nowrap text-slate-600 dark:text-slate-300 flex items-center gap-1.5" title="Immersive WebXR 3D Showroom">
+              <span class="material-symbols-outlined text-[18px]">vrpano</span>
+              <span>${this.t('webxrMode')}</span>
             </button>
             <button id="nav-tracking-btn" class="hover:text-blue-600 dark:hover:text-cyan-400 transition-colors whitespace-nowrap ${
               this.currentView === 'tracking' ? 'text-blue-600 dark:text-cyan-400 font-semibold' : 'text-slate-600 dark:text-slate-300'
@@ -289,7 +290,7 @@ export class StoreApp {
     });
     header.querySelector('#nav-3d-btn')?.addEventListener('click', () => {
       const featured = inventoryService.getProducts()[0];
-      if (featured) this.open3DViewer(featured);
+      this.launchWebXRShowroom(featured);
     });
     header.querySelector('#nav-tracking-btn')?.addEventListener('click', () => {
       this.currentView = 'tracking';
@@ -355,7 +356,11 @@ export class StoreApp {
             Engineered with 8K micro-OLED optical waveguides, neural gesture telemetry, and Grade-5 titanium chassis. Inspect every component in interactive 3D or experience our WebXR showroom.
           </p>
           <div class="flex flex-wrap items-center gap-4">
-            <button id="hero-inspect-btn" class="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm shadow-lg shadow-blue-500/25 transition-all flex items-center gap-2">
+            <button id="hero-webxr-btn" class="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2">
+              <span class="material-symbols-outlined text-[20px]">vrpano</span>
+              <span>WebXR Showroom</span>
+            </button>
+            <button id="hero-inspect-btn" class="px-5 py-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-sm transition-all flex items-center gap-2">
               <span class="material-symbols-outlined text-[20px]">view_in_ar</span>
               ${this.t('inspect3D')}
             </button>
@@ -375,6 +380,10 @@ export class StoreApp {
       </div>
     `;
 
+    hero.querySelector('#hero-webxr-btn')?.addEventListener('click', () => {
+      const visor = inventoryService.getProductById('prod-visor-spectrum');
+      this.launchWebXRShowroom(visor || undefined);
+    });
     hero.querySelector('#hero-inspect-btn')?.addEventListener('click', () => {
       const visor = inventoryService.getProductById('prod-visor-spectrum');
       if (visor) this.open3DViewer(visor);
@@ -535,13 +544,21 @@ export class StoreApp {
           <button data-wishlist-id="${p.id}" class="absolute top-3 right-3 p-2 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur text-slate-600 dark:text-slate-300 hover:text-rose-500 transition-colors shadow-sm">
             <span class="material-symbols-outlined text-[18px] ${isWishlisted ? 'fill text-rose-500' : ''}">favorite</span>
           </button>
-          <!-- 3D Inspect Badge Button -->
-          <button data-inspect-id="${
-            p.id
-          }" class="absolute bottom-3 left-3 px-3 py-1.5 rounded-lg bg-slate-950/80 hover:bg-blue-600 text-white text-xs font-semibold backdrop-blur flex items-center gap-1.5 transition-all">
-            <span class="material-symbols-outlined text-[16px]">view_in_ar</span>
-            <span>3D Lab</span>
-          </button>
+          <!-- 3D Inspect & VR Showroom Buttons -->
+          <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+            <button data-inspect-id="${
+              p.id
+            }" class="pointer-events-auto px-2.5 py-1.5 rounded-lg bg-slate-950/80 hover:bg-blue-600 text-white text-xs font-semibold backdrop-blur flex items-center gap-1 transition-all shadow-sm">
+              <span class="material-symbols-outlined text-[15px]">view_in_ar</span>
+              <span>3D Lab</span>
+            </button>
+            <button data-vr-id="${
+              p.id
+            }" class="pointer-events-auto px-2.5 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-600 text-white text-xs font-semibold backdrop-blur flex items-center gap-1 transition-all shadow-sm" title="View in VR Showroom">
+              <span class="material-symbols-outlined text-[15px]">vrpano</span>
+              <span>VR</span>
+            </button>
+          </div>
         </div>
 
         <!-- Product Metadata Content -->
@@ -620,6 +637,15 @@ export class StoreApp {
       });
     });
 
+    container.querySelectorAll('button[data-vr-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (btn as HTMLElement).dataset.vrId;
+        const p = inventoryService.getProductById(id || '');
+        if (p) this.launchWebXRShowroom(p);
+      });
+    });
+
     container.querySelectorAll('button[data-add-cart-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -666,6 +692,32 @@ export class StoreApp {
     }
     this.active3DProduct = null;
     this.render();
+  }
+
+  public async launchWebXRShowroom(product?: Product) {
+    if (this.active3DProduct) {
+      this.close3DViewer();
+    }
+    inventoryService.addToast(
+      'Virtual Showroom',
+      'Entering WebXR Spatial Pavilion. Use controllers or pointer to inspect 3D models.',
+      'info'
+    );
+    try {
+      const showroom = new WebXRShowroom(product);
+      xb.add(showroom);
+      const options = new xb.Options();
+      options.setAppTitle('Aether Spatial Showroom');
+      options.setAppDescription(
+        'Explore 3D spatial electronics in virtual reality. Rotate pedestals, customize finishes, and add to cart.'
+      );
+      options.enableHands();
+      options.hands.visualization = true;
+      options.simulator.defaultMode = xb.SimulatorMode.CONTROLLER;
+      await xb.init(options);
+    } catch (err: any) {
+      console.warn('WebXR startup:', err);
+    }
   }
 
   private render3DModal(): HTMLElement {
@@ -842,18 +894,8 @@ export class StoreApp {
     });
 
     // Enter WebXR Showroom
-    modal.querySelector('#dock-webxr-btn')?.addEventListener('click', async () => {
-      this.close3DViewer();
-      inventoryService.addToast('Entering WebXR', 'Initializing WebXR Spatial Showroom...', 'info');
-      try {
-        xb.add(new WebXRShowroom(p));
-        const options = new xb.Options();
-        options.setAppTitle('Aether Spatial Showroom');
-        options.simulator.defaultMode = xb.SimulatorMode.CONTROLLER;
-        await xb.init(options);
-      } catch (err: any) {
-        console.warn('WebXR startup:', err);
-      }
+    modal.querySelector('#dock-webxr-btn')?.addEventListener('click', () => {
+      this.launchWebXRShowroom(p);
     });
 
     modal.querySelector('#modal-add-cart-btn')?.addEventListener('click', () => {
@@ -1429,7 +1471,7 @@ export class StoreApp {
     return modal;
   }
 
-  // --- Real-Time Order Tracking View (Google Maps) ---
+  // --- Real-Time Order Tracking View (Google Maps Integration) ---
   private renderTrackingView(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'flex flex-col gap-6';
@@ -1454,12 +1496,15 @@ export class StoreApp {
     }
 
     wrap.innerHTML = `
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+      <!-- Top Title & Order Switcher -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <div class="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-cyan-400 uppercase tracking-wider">
-            <span>Priority Live Telematics</span>
+          <div class="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-cyan-400 uppercase tracking-wider mb-1">
+            <span>Priority Telematics</span>
             <span>·</span>
             <span>Order #${activeOrder.id}</span>
+            <span>·</span>
+            <span class="text-emerald-500 font-mono">STATUS: ${activeOrder.status.toUpperCase()}</span>
           </div>
           <h1 class="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
             ${this.t('deliveryLiveTracking')}
@@ -1467,46 +1512,108 @@ export class StoreApp {
         </div>
 
         <div class="flex items-center gap-3">
-          <button id="track-back-store-btn" class="px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800">
+          <!-- Active Orders Switcher -->
+          ${
+            orders.length > 1
+              ? `
+            <select id="track-order-switcher" class="px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium">
+              ${orders
+                .map(
+                  (o) => `
+                <option value="${o.id}" ${o.id === activeOrder.id ? 'selected' : ''}>
+                  Order #${o.id} ($${o.totalAmount.toLocaleString()})
+                </option>
+              `
+                )
+                .join('')}
+            </select>
+          `
+              : ''
+          }
+
+          <button id="track-back-store-btn" class="px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
             Back to Store
           </button>
         </div>
       </div>
 
-      <!-- Google Maps Canvas Container (Mandatory explicit height per CF2) -->
-      <div class="relative w-full h-[450px] md:h-[520px] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl bg-slate-950">
-        <div id="google-maps-tracking-canvas" class="w-full h-full"></div>
+      <!-- Main Google Maps Delivery Tracker Mount Container -->
+      <div id="google-maps-delivery-tracker-mount" class="w-full h-[580px] md:h-[640px]"></div>
 
-        <!-- Floating Live Telematics Card -->
-        <div class="absolute top-4 left-4 z-20 w-[90%] max-w-sm bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 rounded-xl p-4 backdrop-blur shadow-xl">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2.5">
-              <div class="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-cyan-400 flex items-center justify-center font-bold text-sm">
-                AR
-              </div>
-              <div>
-                <div class="text-xs font-bold text-slate-900 dark:text-white">${activeOrder.courier.name}</div>
-                <div class="text-[11px] text-slate-500">${activeOrder.courier.vehicle}</div>
-              </div>
+      <!-- Package & Recipient Overview Cards Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Destination Card -->
+        <div class="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+              <span class="material-symbols-outlined text-[18px] text-emerald-500">pin_drop</span>
+              <span>Delivery Address</span>
             </div>
-            <div class="text-right">
-              <div class="text-sm font-bold font-mono text-blue-600 dark:text-cyan-400 tabular-nums">
-                ${activeOrder.courier.etaMinutes} MIN
-              </div>
-              <div class="text-[10px] text-slate-400 uppercase font-semibold">Live ETA</div>
+            <div class="text-sm font-bold text-slate-900 dark:text-white">${activeOrder.shippingAddress.fullName}</div>
+            <div class="text-xs text-slate-500 mt-1 leading-relaxed">
+              ${activeOrder.shippingAddress.street}<br>
+              ${activeOrder.shippingAddress.city}, ${activeOrder.shippingAddress.postalCode}<br>
+              ${activeOrder.shippingAddress.country}
             </div>
           </div>
+          <div class="pt-3 border-t border-slate-100 dark:border-slate-800 mt-3 text-[11px] text-slate-400">
+            Encrypted delivery notes active
+          </div>
+        </div>
 
-          <div class="space-y-2 text-xs">
-            <div class="flex justify-between text-slate-600 dark:text-slate-400">
-              <span>Courier Speed:</span>
-              <span class="font-mono font-semibold">${activeOrder.courier.speedKmh} km/h</span>
+        <!-- Shipment Contents Card -->
+        <div class="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+              <span class="material-symbols-outlined text-[18px] text-blue-500">inventory_2</span>
+              <span>Package Hardware</span>
             </div>
-            <div class="flex justify-between text-slate-600 dark:text-slate-400">
-              <span>Security Vault:</span>
-              <span class="text-emerald-500 font-semibold">256-Bit Telematics</span>
+            <div class="space-y-2">
+              ${activeOrder.items
+                .map((item) => {
+                  const p = inventoryService.getProductById(item.productId);
+                  return `
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-medium text-slate-800 dark:text-slate-200">${p?.name || item.productId}</span>
+                      <span class="font-mono text-slate-500">Qty: ${item.quantity}</span>
+                    </div>
+                  `;
+                })
+                .join('')}
             </div>
           </div>
+          <div class="pt-3 border-t border-slate-100 dark:border-slate-800 mt-3 flex justify-between text-xs font-bold">
+            <span class="text-slate-500">Total Value:</span>
+            <span class="font-mono text-blue-600 dark:text-cyan-400 tabular-nums">$${activeOrder.totalAmount.toLocaleString()} USD</span>
+          </div>
+        </div>
+
+        <!-- Security & Courier Dispatch Card -->
+        <div class="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+              <span class="material-symbols-outlined text-[18px] text-cyan-400">verified</span>
+              <span>Courier Security</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <div class="flex justify-between">
+                <span>Anti-Tamper Seal:</span>
+                <span class="text-emerald-500 font-semibold font-mono">ACTIVE #S-9182</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Vehicle Fleet:</span>
+                <span class="font-mono">Autonomous Van #14</span>
+              </div>
+              <div class="flex justify-between">
+                <span>GPS Accuracy:</span>
+                <span class="text-blue-500 font-mono">± 0.8 meters</span>
+              </div>
+            </div>
+          </div>
+          <button id="track-contact-courier-btn" class="w-full mt-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px]">phone_in_talk</span>
+            <span>Contact Courier Securely</span>
+          </button>
         </div>
       </div>
     `;
@@ -1516,15 +1623,32 @@ export class StoreApp {
       this.render();
     });
 
-    // Mount Google Maps
+    wrap.querySelector('#track-order-switcher')?.addEventListener('change', (e) => {
+      const orderId = (e.target as HTMLSelectElement).value;
+      const found = inventoryService.getOrderById(orderId);
+      if (found) {
+        this.activeTrackingOrder = found;
+        this.render();
+      }
+    });
+
+    wrap.querySelector('#track-contact-courier-btn')?.addEventListener('click', () => {
+      inventoryService.addToast(
+        'Encrypted Dispatch Radio',
+        `Connected to ${activeOrder.courier.name} via secure encrypted voice proxy.`,
+        'info'
+      );
+    });
+
+    // Mount GoogleMapsDeliveryTracker component
     requestAnimationFrame(() => {
-      const mapContainer = document.getElementById('google-maps-tracking-canvas');
-      if (mapContainer) {
-        if (this.trackingMapInstance) {
-          this.trackingMapInstance.destroy();
+      const mountEl = document.getElementById('google-maps-delivery-tracker-mount');
+      if (mountEl) {
+        if (this.deliveryTracker) {
+          this.deliveryTracker.destroy();
         }
-        this.trackingMapInstance = new OrderTrackingMap(mapContainer);
-        this.trackingMapInstance.init(activeOrder.courier);
+        this.deliveryTracker = new GoogleMapsDeliveryTracker(mountEl, activeOrder);
+        this.deliveryTracker.render();
       }
     });
 
