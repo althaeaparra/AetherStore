@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import {
+  getSharedEnvironment,
+  isSoftwareGl,
+  prewarmShaders,
+  disposeHierarchy,
+} from '../services/environmentService';
 
 import type { ModelFinish, ModelPartInfo } from './ModelBuilders';
 import { buildModelByType, getMaterialForFinish } from './ModelBuilders';
@@ -35,24 +40,24 @@ export class ThreeModelViewer {
   constructor(container: HTMLElement) {
     this.container = container;
 
-    // Renderer setup with ACESFilmicToneMapping
+    const softwareGl = isSoftwareGl();
+
+    // Renderer setup with ACESFilmicToneMapping & adaptive pixel ratio
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !softwareGl,
       alpha: true,
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(softwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth || 400, container.clientHeight || 400);
     this.container.appendChild(this.renderer.domElement);
 
-    // Scene & Environment Reflections
+    // Scene & Shared Singleton Environment Reflection
     this.scene = new THREE.Scene();
-    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
+    this.scene.environment = getSharedEnvironment(this.renderer);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(
@@ -162,7 +167,7 @@ export class ThreeModelViewer {
     this.currentFinish = finish;
     if (this.currentModelGroup) {
       this.scene.remove(this.currentModelGroup);
-      this.disposeObject(this.currentModelGroup);
+      disposeHierarchy(this.currentModelGroup);
       this.currentModelGroup = null;
       this.parts = [];
     }
@@ -172,6 +177,7 @@ export class ThreeModelViewer {
 
     this.currentModelGroup = group;
     this.scene.add(group);
+    void prewarmShaders(this.renderer, this.scene, this.camera);
   }
 
   public setExplodedView(factor: number) {
@@ -233,32 +239,18 @@ export class ThreeModelViewer {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private disposeObject(obj: THREE.Object3D) {
-    obj.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        if (mesh.geometry) mesh.geometry.dispose();
-        if (mesh.material) {
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((m) => m.dispose());
-          } else {
-            mesh.material.dispose();
-          }
-        }
-      }
-    });
-  }
-
   public destroy() {
     this.isDestroyed = true;
     cancelAnimationFrame(this.frameId);
     if (this.currentModelGroup) {
       this.scene.remove(this.currentModelGroup);
-      this.disposeObject(this.currentModelGroup);
+      disposeHierarchy(this.currentModelGroup);
+      this.currentModelGroup = null;
     }
     if (this.contactShadow) {
       this.scene.remove(this.contactShadow);
-      this.disposeObject(this.contactShadow);
+      disposeHierarchy(this.contactShadow);
+      this.contactShadow = null;
     }
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {

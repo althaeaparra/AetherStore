@@ -5,8 +5,13 @@ import { inventoryService } from '../services/inventoryService';
 import {
   ModelFinish,
   buildModelByType,
+  buildLowPolyProxyModel,
   getMaterialForFinish,
 } from './ModelBuilders';
+import {
+  getSharedEnvironment,
+  disposeHierarchy,
+} from '../services/environmentService';
 
 interface PedestalItem {
   product: Product;
@@ -58,11 +63,28 @@ export class WebXRShowroom extends xb.Script {
 
   init() {
     this.initAudio();
+    this.setupEnvironmentAndVRQuality();
     this.buildShowroomArchitecture();
     this.buildPedestalArc();
     this.buildCenterExaminationDais();
     this.buildSpatialUI();
     this.loadActiveModel();
+  }
+
+  private setupEnvironmentAndVRQuality() {
+    try {
+      const coreAny = xb.core as any;
+      if (coreAny?.renderer) {
+        const env = getSharedEnvironment(coreAny.renderer);
+        if (coreAny.scene) {
+          coreAny.scene.environment = env;
+        }
+        // Fixed Foveated Rendering: Allocates full fragment shading to optical center in VR headsets
+        coreAny.renderer.xr?.setFoveation?.(1.0);
+      }
+    } catch {
+      // Graceful fallback
+    }
   }
 
   // --- 1. Audio Synthesizer (Procedural Zero-404 Web Audio) ---
@@ -157,9 +179,9 @@ export class WebXRShowroom extends xb.Script {
       this.roomGroup?.add(ring);
     });
 
-    // Perimeter Architectural Neon Pillars
+    // Perimeter Architectural Neon Pillars (InstancedMesh: 4 pillars + 4 neon strips = 2 draw calls)
     const pillarAngles = [-1.3, -0.7, 0.7, 1.3];
-    const pillarGeo = new THREE.CylinderGeometry(0.08, 0.08, 3.8, 24);
+    const pillarGeo = new THREE.CylinderGeometry(0.08, 0.08, 3.8, 16);
     const pillarMat = new THREE.MeshStandardMaterial({
       color: 0x1e293b,
       roughness: 0.3,
@@ -168,18 +190,29 @@ export class WebXRShowroom extends xb.Script {
     const stripGeo = new THREE.BoxGeometry(0.02, 3.5, 0.04);
     const stripMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-    pillarAngles.forEach((angle) => {
+    const pillarInstanced = new THREE.InstancedMesh(pillarGeo, pillarMat, pillarAngles.length);
+    const stripInstanced = new THREE.InstancedMesh(stripGeo, stripMat, pillarAngles.length);
+    const dummy = new THREE.Object3D();
+
+    pillarAngles.forEach((angle, idx) => {
       const x = Math.sin(angle) * 3.6;
       const z = -Math.cos(angle) * 3.6 - 1.0;
 
-      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-      pillar.position.set(x, 1.9, z);
-      this.roomGroup?.add(pillar);
+      dummy.position.set(x, 1.9, z);
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      pillarInstanced.setMatrixAt(idx, dummy.matrix);
 
-      const strip = new THREE.Mesh(stripGeo, stripMat);
-      strip.position.set(x * 0.98, 1.9, z * 0.98);
-      this.roomGroup?.add(strip);
+      dummy.position.set(x * 0.98, 1.9, z * 0.98);
+      dummy.updateMatrix();
+      stripInstanced.setMatrixAt(idx, dummy.matrix);
     });
+
+    pillarInstanced.instanceMatrix.needsUpdate = true;
+    stripInstanced.instanceMatrix.needsUpdate = true;
+    this.roomGroup?.add(pillarInstanced);
+    this.roomGroup?.add(stripInstanced);
 
     // Atmospheric Cyber Dust Particles
     const dustCount = 120;
@@ -237,14 +270,14 @@ export class WebXRShowroom extends xb.Script {
       glowRingMesh.position.y = 0.755;
       baseGroup.add(glowRingMesh);
 
-      // Floating Mini Preview Model
+      // Floating Mini Preview Model (LOD: Low-Poly Proxy with fast standard materials)
       const previewModel = new THREE.Group();
       previewModel.scale.setScalar(0.48);
       previewModel.position.set(0, 0.98, 0);
-      buildModelByType(product.modelType, previewModel, 'titanium');
+      buildLowPolyProxyModel(product.modelType, previewModel, 'titanium');
       baseGroup.add(previewModel);
 
-      // 3D Canvas Label (Billboard)
+      // 3D Canvas Label (Billboard with optimized power-of-two texture)
       const labelCanvas = document.createElement('canvas');
       labelCanvas.width = 512;
       labelCanvas.height = 128;
@@ -268,6 +301,8 @@ export class WebXRShowroom extends xb.Script {
       }
       const labelTexture = new THREE.CanvasTexture(labelCanvas);
       labelTexture.colorSpace = THREE.SRGBColorSpace;
+      labelTexture.generateMipmaps = false;
+      labelTexture.minFilter = THREE.LinearFilter;
       const labelMesh = new THREE.Mesh(
         new THREE.PlaneGeometry(0.45, 0.11),
         new THREE.MeshBasicMaterial({ map: labelTexture, transparent: true })
@@ -275,6 +310,15 @@ export class WebXRShowroom extends xb.Script {
       labelMesh.position.set(0, 1.25, 0);
       labelMesh.lookAt(0, 1.25, 0); // Face center/user
       baseGroup.add(labelMesh);
+
+      // Simplified invisible collision proxy for instant zero-latency spatial raycasting
+      const hitProxy = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.24, 0.28, 1.35, 8),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitProxy.position.y = 0.68;
+      hitProxy.name = `PedestalHitProxy_${product.id}`;
+      baseGroup.add(hitProxy);
 
       // Make pedestal selectable in XR & Desktop
       baseGroup.name = `Pedestal_${product.id}`;
@@ -516,7 +560,7 @@ export class WebXRShowroom extends xb.Script {
 
     if (this.activeModelGroup) {
       this.activeModelRoot.remove(this.activeModelGroup);
-      this.disposeObject(this.activeModelGroup);
+      disposeHierarchy(this.activeModelGroup);
       this.activeModelGroup = null;
     }
 
@@ -608,37 +652,24 @@ export class WebXRShowroom extends xb.Script {
     }
   }
 
-  private disposeObject(obj: THREE.Object3D) {
-    obj.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        if (mesh.geometry) mesh.geometry.dispose();
-        if (mesh.material) {
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((m) => m.dispose());
-          } else {
-            mesh.material.dispose();
-          }
-        }
-      }
-    });
-  }
-
   dispose() {
     if (this.roomGroup) {
-      this.disposeObject(this.roomGroup);
+      disposeHierarchy(this.roomGroup);
       this.remove(this.roomGroup);
+      this.roomGroup = null;
     }
     if (this.centerDais) {
-      this.disposeObject(this.centerDais);
+      disposeHierarchy(this.centerDais);
       this.remove(this.centerDais);
+      this.centerDais = null;
     }
     if (this.activeModelRoot) {
-      this.disposeObject(this.activeModelRoot);
+      disposeHierarchy(this.activeModelRoot);
       this.remove(this.activeModelRoot);
+      this.activeModelRoot = null;
     }
     this.pedestals.forEach((p) => {
-      this.disposeObject(p.baseGroup);
+      disposeHierarchy(p.baseGroup);
       this.remove(p.baseGroup);
     });
     this.pedestals = [];

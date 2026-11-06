@@ -355,3 +355,94 @@ export function buildModelByType(
       break;
   }
 }
+
+/**
+ * Lightweight Level of Detail (LOD) Proxy Models:
+ * Used for background radial pedestals and distant previews.
+ * Reduces vertex count by >75% and replaces expensive transmission
+ * multi-pass shaders with fast standard materials.
+ */
+export function buildLowPolyProxyModel(
+  type: 'visor' | 'ring' | 'neural' | 'drone' | 'watch',
+  group: THREE.Group,
+  finish: ModelFinish = 'titanium'
+): void {
+  const metalMat = getMaterialForFinish(finish);
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.3 });
+
+  switch (type) {
+    case 'visor': {
+      // 16-segment curved shield + brow
+      const shieldGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.2, 16, 1, true, -Math.PI / 3, (2 * Math.PI) / 3);
+      const shieldMat = new THREE.MeshStandardMaterial({
+        color: 0x2563eb,
+        roughness: 0.2,
+        transparent: true,
+        opacity: 0.75,
+      });
+      const shield = new THREE.Mesh(shieldGeo, shieldMat);
+      shield.rotation.y = Math.PI / 2;
+      group.add(shield);
+
+      const browGeo = new THREE.TorusGeometry(0.35, 0.03, 8, 16, Math.PI);
+      const brow = new THREE.Mesh(browGeo, metalMat);
+      brow.rotation.x = Math.PI / 2;
+      brow.position.y = 0.1;
+      group.add(brow);
+      break;
+    }
+    case 'ring': {
+      const ringGeo = new THREE.TorusGeometry(0.28, 0.045, 10, 18);
+      const ring = new THREE.Mesh(ringGeo, metalMat);
+      group.add(ring);
+
+      const gemGeo = new THREE.OctahedronGeometry(0.08, 0);
+      const gemMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.1, metalness: 0.5 });
+      const gem = new THREE.Mesh(gemGeo, gemMat);
+      gem.position.set(0, 0.14, 0.24);
+      group.add(gem);
+      break;
+    }
+    case 'neural': {
+      const archGeo = new THREE.TorusGeometry(0.35, 0.03, 8, 16, Math.PI * 0.85);
+      const arch = new THREE.Mesh(archGeo, darkMat);
+      arch.rotation.x = Math.PI / 2;
+      group.add(arch);
+
+      const nodeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.06, 12);
+      const node = new THREE.Mesh(nodeGeo, metalMat);
+      node.position.set(0, 0.15, 0.12);
+      group.add(node);
+      break;
+    }
+    case 'drone': {
+      const bodyGeo = new THREE.BoxGeometry(0.22, 0.08, 0.32);
+      const body = new THREE.Mesh(bodyGeo, darkMat);
+      group.add(body);
+
+      // Simple 4-rotor disc proxies
+      const rotorGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.01, 10);
+      const rotorMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.4 });
+      [-0.22, 0.22].forEach((x) => {
+        [-0.22, 0.22].forEach((z) => {
+          const rotor = new THREE.Mesh(rotorGeo, rotorMat);
+          rotor.position.set(x, 0.04, z);
+          group.add(rotor);
+        });
+      });
+      break;
+    }
+    case 'watch': {
+      const caseGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 20);
+      const watchCase = new THREE.Mesh(caseGeo, darkMat);
+      group.add(watchCase);
+
+      const bezelGeo = new THREE.TorusGeometry(0.32, 0.02, 8, 20);
+      const bezel = new THREE.Mesh(bezelGeo, metalMat);
+      bezel.rotation.x = Math.PI / 2;
+      bezel.position.y = 0.04;
+      group.add(bezel);
+      break;
+    }
+  }
+}
